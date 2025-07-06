@@ -7,12 +7,10 @@ import re
 from datetime import datetime, timedelta
 import Levenshtein
 
-# Format date in base64 to create URL for downloading the latest newly registered domain list
 def get_encoded_date_string(date_obj):
     filename = date_obj.strftime("%Y-%m-%d.zip")
     return base64.b64encode(filename.encode()).decode()
 
-# Download the domain list
 def download_and_extract(encoded_date):
     url = f"https://www.whoisds.com//whois-database/newly-registered-domains/{encoded_date}/nrd"
     print(f"Trying URL: {url}")
@@ -21,7 +19,7 @@ def download_and_extract(encoded_date):
     if response.status_code == 200 and response.content[:2] == b'PK':
         print("Valid ZIP file detected. Extracting...")
         with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
-            extract_dir = "extracted_domains"
+            extract_dir = "extracted_domains_tmp"
             os.makedirs(extract_dir, exist_ok=True)
             zip_file.extractall(extract_dir)
             print(f"Files extracted to: {extract_dir}")
@@ -31,7 +29,6 @@ def download_and_extract(encoded_date):
         print(f"Status: {response.status_code}, Content-Type: {response.headers.get('Content-Type')}")
         return None
 
-# Typosquatting generator - can be expanded
 def generate_typosquatting_domains(domain):
     base, _, tld = domain.lower().rpartition('.')
     variants = set()
@@ -70,16 +67,14 @@ def generate_typosquatting_domains(domain):
 
     return variants
 
-# Regex pattern builder - can be expanded
 def build_regex_patterns(base_name):
     patterns = [
-        rf"{base_name}[-]?[a-z0-9]*",             # e.g., microsoftlogin
-        rf"{base_name}[a-z0-9]*[-]?[a-z0-9]*",     # e.g., microsoft123-login
-        rf"[a-z0-9]*{base_name}[a-z0-9]*",         # e.g., loginmicrosoft123
+        rf"{base_name}[-]?[a-z0-9]*",
+        rf"{base_name}[a-z0-9]*[-]?[a-z0-9]*",
+        rf"[a-z0-9]*{base_name}[a-z0-9]*",
     ]
     return [re.compile(p, re.IGNORECASE) for p in patterns]
 
-# Domain search function using all three pattern matching methods
 def search_domains(extract_dir, legit_domain, levenshtein_threshold=2):
     base_name = legit_domain.split('.')[0].lower()
     tld = legit_domain.split('.')[-1].lower()
@@ -87,7 +82,6 @@ def search_domains(extract_dir, legit_domain, levenshtein_threshold=2):
     regex_patterns = build_regex_patterns(base_name)
 
     matched_domains = set()
-    all_registered = set()
 
     for filename in os.listdir(extract_dir):
         if filename.endswith(".txt"):
@@ -95,43 +89,57 @@ def search_domains(extract_dir, legit_domain, levenshtein_threshold=2):
             with open(txt_path, "r", encoding="utf-8", errors="ignore") as file:
                 for line in file:
                     domain = line.strip().lower()
-                    all_registered.add(domain)
 
-                    # 1. Exact match to typosquatting variant
                     if domain in typoset:
                         matched_domains.add(domain)
                         continue
 
-                    # 2. Regex match
                     if any(p.search(domain) for p in regex_patterns):
                         matched_domains.add(domain)
                         continue
 
-                    # 3. Levenshtein distance match on base name
                     domain_part = domain.split('.')[0]
                     distance = Levenshtein.distance(domain_part, base_name)
                     if 0 < distance <= levenshtein_threshold:
                         matched_domains.add(domain)
 
     if matched_domains:
-        print(f"\nDetected suspicious domains related to '{legit_domain}':")
+        print(f"\nDetected suspicious domains related to '{legit_domain}' in '{extract_dir}':")
         for match in sorted(matched_domains):
             print("  -", match)
     else:
-        print(f"No suspicious domains found for '{legit_domain}'.")
-
+        print(f"No suspicious domains found for '{legit_domain}' in '{extract_dir}'.")
 
 if __name__ == '__main__':
+    base_dir = "extracted_domains"
+    os.makedirs(base_dir, exist_ok=True)
+
     today = datetime.today()
-    encoded_today = get_encoded_date_string(today)
-    extract_dir = download_and_extract(encoded_today)
+    downloaded_days = []
+    days_checked = 0
 
-    if not extract_dir:
-        print("Trying yesterday as fallback...")
-        encoded_yesterday = get_encoded_date_string(today - timedelta(days=1))
-        extract_dir = download_and_extract(encoded_yesterday)
+    while len(downloaded_days) < 4:
+        date_obj = today - timedelta(days=days_checked)
+        days_checked += 1
 
-    if extract_dir:
+        encoded_date = get_encoded_date_string(date_obj)
+        dated_dir = os.path.join(base_dir, date_obj.strftime("%Y-%m-%d"))
+
+        if os.path.exists(dated_dir):
+            print(f"Already downloaded for {date_obj.strftime('%Y-%m-%d')}, skipping.")
+            downloaded_days.append(dated_dir)
+            continue
+
+        print(f"\nDownloading domains for {date_obj.strftime('%Y-%m-%d')}")
+        extract_dir = download_and_extract(encoded_date)
+
+        if extract_dir:
+            os.rename(extract_dir, dated_dir)
+            downloaded_days.append(dated_dir)
+        else:
+            print(f"Failed to retrieve data for {date_obj.strftime('%Y-%m-%d')}")
+
+    if downloaded_days:
         while True:
             user_input = input("\nEnter your legitimate domain (or type 'exit' to quit): ").strip()
             if user_input.lower() == "exit":
@@ -141,5 +149,6 @@ if __name__ == '__main__':
                 print("Invalid domain format (example: microsoft.com)")
                 continue
 
-            # levenshtein_threshold can be increased to 2 to increase the scope of detection but will increase noise
-            search_domains(extract_dir, user_input, levenshtein_threshold=1)
+            for dir_path in downloaded_days:
+                print(f"\nSearching in {dir_path}...")
+                search_domains(dir_path, user_input, levenshtein_threshold=1)
