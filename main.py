@@ -110,7 +110,21 @@ def search_domains(extract_dir, legit_domain, levenshtein_threshold=2):
     else:
         print(f"No suspicious domains found for '{legit_domain}' in '{extract_dir}'.")
 
+
+def banner():
+    print("")
+    print(" _____         _____  _____             ")
+    print(" |  __ \\       |  __ \\|  __ \\     /\\    ")
+    print(" | |  | |_ __  | |  | | |__) |   /  \\   ")
+    print(" | |  | | '__| | |  | |  _  /   / /\\ \\  ")
+    print(" | |__| | |    | |__| | | \\ \\  / ____ \\ ")
+    print(" |_____/|_|    |_____/|_|  \\_\\/_/    \\_\\ ")
+    print("\nCreated by smh-404")
+    print("More information can be found on: https://github.com/smh-404/DrDRA")
+
+
 if __name__ == '__main__':
+    banner()
     base_dir = "extracted_domains"
     os.makedirs(base_dir, exist_ok=True)
 
